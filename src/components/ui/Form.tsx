@@ -1,5 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { motion } from 'framer-motion';
+import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { db, isFirebaseConfigured } from '../../firebase';
+
+const SUBMISSION_TIMEOUT_MS = 15000;
 
 interface InputProps {
   label?: string;
@@ -170,7 +174,7 @@ export const Checkbox: React.FC<CheckboxProps> = ({
 
 interface FormProps {
   children: React.ReactNode;
-  onSubmit?: (e: React.FormEvent) => void;
+  onSubmit?: (e: React.FormEvent<HTMLFormElement>) => void;
   className?: string;
 }
 
@@ -199,8 +203,34 @@ export interface ApplyFormData {
   linkedIn: string;
 }
 
+const getErrorMessage = (error: unknown) => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return 'Unknown error';
+};
+
+const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number): Promise<T> => {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error('Firestore submission timed out. Please check your Firebase config, rules, and network.'));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+};
+
 export const ApplyForm: React.FC<ApplyFormProps> = ({ onSubmit }) => {
-  const [formData, setFormData] = React.useState<ApplyFormData>({
+  const [formData, setFormData] = useState<ApplyFormData>({
     fullName: '',
     email: '',
     year: '',
@@ -208,7 +238,10 @@ export const ApplyForm: React.FC<ApplyFormProps> = ({ onSubmit }) => {
     linkedIn: '',
   });
 
-  const [errors, setErrors] = React.useState<Partial<ApplyFormData>>({});
+  const [errors, setErrors] = useState<Partial<ApplyFormData>>({});
+  const [loading, setLoading] = useState(false);
+  const [submitError, setSubmitError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
 
   const validateForm = () => {
     const newErrors: Partial<ApplyFormData> = {};
@@ -231,27 +264,63 @@ export const ApplyForm: React.FC<ApplyFormProps> = ({ onSubmit }) => {
     }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const newErrors = validateForm();
+    setSubmitError('');
+    setSuccessMessage('');
 
+    const newErrors = validateForm();
     if (Object.keys(newErrors).length > 0) {
+      console.warn('[ApplyForm] Validation failed:', newErrors);
       setErrors(newErrors);
       return;
     }
 
-    onSubmit?.(formData);
-    setFormData({
-      fullName: '',
-      email: '',
-      year: '',
-      domain: '',
-      linkedIn: '',
-    });
+    setLoading(true);
+    setErrors({});
+    console.log('[ApplyForm] Starting Firestore submission:', formData);
+
+    try {
+      if (!isFirebaseConfigured) {
+        throw new Error('Firebase config is missing. Set VITE_FIREBASE_* values before submitting.');
+      }
+
+      const docRef = await withTimeout(addDoc(collection(db, 'applications'), {
+        fullName: formData.fullName,
+        email: formData.email,
+        year: formData.year,
+        interestedDomain: formData.domain,
+        linkedinId: formData.linkedIn,
+        timestamp: serverTimestamp(),
+      }), SUBMISSION_TIMEOUT_MS);
+
+      console.log('[ApplyForm] Firestore submission successful. Document ID:', docRef.id);
+      setSuccessMessage('Application submitted successfully!');
+      onSubmit?.(formData);
+      setFormData({
+        fullName: '',
+        email: '',
+        year: '',
+        domain: '',
+        linkedIn: '',
+      });
+    } catch (error) {
+      const message = getErrorMessage(error);
+
+      console.error('[ApplyForm] Firestore submission error:', error);
+      setSubmitError(`Failed to submit application. ${message}`);
+    } finally {
+      console.log('[ApplyForm] Submission finished. Resetting loading state.');
+      setLoading(false);
+    }
   };
 
   return (
     <Form onSubmit={handleSubmit} className="max-w-2xl">
+      {successMessage && (
+        <p className="text-center text-sm text-green-400">{successMessage}</p>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <Input
           label="Full Name *"
@@ -308,13 +377,20 @@ export const ApplyForm: React.FC<ApplyFormProps> = ({ onSubmit }) => {
         onChange={handleChange}
       />
 
+      {submitError && (
+        <p className="text-center text-sm text-red-400">{submitError}</p>
+      )}
+
       <motion.button
         whileHover={{ scale: 1.02 }}
         whileTap={{ scale: 0.98 }}
         type="submit"
-        className="w-full bg-gradient-to-r from-accent to-purple-500 text-white font-semibold py-3 rounded-lg hover:shadow-glow-cyan-lg transition-all duration-300"
+        disabled={loading}
+        className={`w-full bg-gradient-to-r from-accent to-purple-500 text-white font-semibold py-3 rounded-lg hover:shadow-glow-cyan-lg transition-all duration-300 ${
+          loading ? 'opacity-70 cursor-not-allowed' : ''
+        }`}
       >
-        Submit Application
+        {loading ? 'Submitting...' : 'Submit Application'}
       </motion.button>
     </Form>
   );
