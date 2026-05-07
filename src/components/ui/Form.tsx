@@ -1,9 +1,7 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
-import { db, isFirebaseConfigured } from '../../firebase';
-
-const SUBMISSION_TIMEOUT_MS = 15000;
+import { db } from '../../firebase';
 
 interface InputProps {
   label?: string;
@@ -174,7 +172,7 @@ export const Checkbox: React.FC<CheckboxProps> = ({
 
 interface FormProps {
   children: React.ReactNode;
-  onSubmit?: (e: React.FormEvent<HTMLFormElement>) => void;
+  onSubmit?: (e: React.FormEvent) => void;
   className?: string;
 }
 
@@ -202,32 +200,6 @@ export interface ApplyFormData {
   domain: string;
   linkedIn: string;
 }
-
-const getErrorMessage = (error: unknown) => {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return 'Unknown error';
-};
-
-const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number): Promise<T> => {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => {
-      reject(new Error('Firestore submission timed out. Please check your Firebase config, rules, and network.'));
-    }, timeoutMs);
-  });
-
-  try {
-    return await Promise.race([promise, timeoutPromise]);
-  } finally {
-    if (timeoutId) {
-      clearTimeout(timeoutId);
-    }
-  }
-};
 
 export const ApplyForm: React.FC<ApplyFormProps> = ({ onSubmit }) => {
   const [formData, setFormData] = useState<ApplyFormData>({
@@ -271,32 +243,23 @@ export const ApplyForm: React.FC<ApplyFormProps> = ({ onSubmit }) => {
 
     const newErrors = validateForm();
     if (Object.keys(newErrors).length > 0) {
-      console.warn('[ApplyForm] Validation failed:', newErrors);
       setErrors(newErrors);
       return;
     }
 
     setLoading(true);
-    setErrors({});
-    console.log('[ApplyForm] Starting Firestore submission:', formData);
 
     try {
-      if (!isFirebaseConfigured) {
-        throw new Error('Firebase config is missing. Set VITE_FIREBASE_* values before submitting.');
-      }
-
-      const docRef = await withTimeout(addDoc(collection(db, 'applications'), {
+      await addDoc(collection(db, 'applications'), {
         fullName: formData.fullName,
         email: formData.email,
         year: formData.year,
         interestedDomain: formData.domain,
         linkedinId: formData.linkedIn,
         timestamp: serverTimestamp(),
-      }), SUBMISSION_TIMEOUT_MS);
+      });
 
-      console.log('[ApplyForm] Firestore submission successful. Document ID:', docRef.id);
       setSuccessMessage('Application submitted successfully!');
-      onSubmit?.(formData);
       setFormData({
         fullName: '',
         email: '',
@@ -304,13 +267,13 @@ export const ApplyForm: React.FC<ApplyFormProps> = ({ onSubmit }) => {
         domain: '',
         linkedIn: '',
       });
+      setErrors({});
+      onSubmit?.(formData);
     } catch (error) {
-      const message = getErrorMessage(error);
-
-      console.error('[ApplyForm] Firestore submission error:', error);
-      setSubmitError(`Failed to submit application. ${message}`);
+      console.error('Firestore submission error:', error);
+      setSubmitError('Failed to submit application. Please try again later.');
+      alert('Failed to submit application');
     } finally {
-      console.log('[ApplyForm] Submission finished. Resetting loading state.');
       setLoading(false);
     }
   };

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { HeroSection } from './components/sections/Hero';
 import { AboutSection } from './components/sections/About';
 import { FeaturesSection } from './components/sections/Features';
@@ -13,10 +14,51 @@ import { motion } from 'framer-motion';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { Menu, X } from 'lucide-react';
+import { AdminDashboard } from './admin/AdminDashboard';
+import { AuthPage } from './pages/AuthPage';
+import { StudentDashboard } from './pages/StudentDashboard';
+import { ProtectedRoute } from './routes/ProtectedRoute';
+import { useAuth } from './context/AuthContext';
+import { Toast } from './components/ui/Toast';
 
 gsap.registerPlugin(ScrollTrigger);
 
 export default function App() {
+  return (
+    <Routes>
+      <Route path="/" element={<PublicSite />} />
+      <Route path="/login" element={<AuthPage mode="login" />} />
+      <Route path="/signup" element={<AuthPage mode="signup" />} />
+      <Route path="/admin-login" element={<AuthPage mode="login" admin />} />
+      <Route element={<ProtectedRoute role="student" />}>
+        <Route path="/dashboard" element={<StudentDashboard />} />
+      </Route>
+      <Route element={<ProtectedRoute role="admin" />}>
+        <Route path="/admin" element={<AdminRoutePage />} />
+      </Route>
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
+}
+
+function AdminRoutePage() {
+  const { user } = useAuth();
+  const [error, setError] = useState('');
+
+  if (!user) {
+    return null;
+  }
+
+  return (
+    <>
+      <Toast message={error} type="error" onClose={() => setError('')} />
+      <AdminDashboard user={user} onError={setError} />
+    </>
+  );
+}
+
+function PublicSite() {
+  const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(true);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -81,7 +123,7 @@ export default function App() {
                 {item.label}
               </motion.button>
             ))}
-            <Button variant="secondary" size="sm">Get Started</Button>
+            <Button variant="secondary" size="sm" onClick={() => navigate('/signup')}>Get Started</Button>
           </div>
 
           {/* Mobile Menu Button */}
@@ -110,7 +152,7 @@ export default function App() {
                 {item.label}
               </button>
             ))}
-            <Button size="sm" className="w-full">
+            <Button size="sm" className="w-full" onClick={() => navigate('/signup')}>
               Get Started
             </Button>
           </motion.div>
