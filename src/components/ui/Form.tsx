@@ -172,7 +172,7 @@ export const Checkbox: React.FC<CheckboxProps> = ({
 
 interface FormProps {
   children: React.ReactNode;
-  onSubmit?: (e: React.FormEvent) => void;
+  onSubmit?: (e: React.FormEvent<HTMLFormElement>) => void | Promise<void>;
   className?: string;
 }
 
